@@ -1,0 +1,73 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.3
+      Plane: XY
+    - Class: rviz_default_plugins/Map
+      Name: SLAM Map
+      Enabled: true
+      Topic:
+        Value: /map
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+      Alpha: 0.72
+    - Class: rviz_default_plugins/LaserScan
+      Name: LiDAR Scan
+      Enabled: true
+      Topic:
+        Value: /scan
+        Reliability Policy: Best Effort
+      Size (m): 0.015
+      Style: Points
+    - Class: rviz_default_plugins/Path
+      Name: Route
+      Enabled: true
+      Topic:
+        Value: /route
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+      Color: 255; 200; 20
+      Line Style: Lines
+      Line Width: 0.02
+    - Class: rviz_default_plugins/Marker
+      Name: Vehicle
+      Enabled: true
+      Topic:
+        Value: /vehicle_marker
+    - Class: rviz_default_plugins/Marker
+      Name: Traffic Light
+      Enabled: true
+      Topic:
+        Value: /traffic_light_marker
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+  Global Options:
+    Background Color: 35; 43; 55
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Current View
+      Angle: 0
+      Scale: 95
+      Target Frame: <Fixed Frame>
+      X: 0
+      Y: 0
+Window Geometry:
+  Width: 1100
+  Height: 760
