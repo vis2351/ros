@@ -9,7 +9,6 @@ import math
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-from nav_msgs.msg import Odometry
 from gazebo_msgs.msg import EntityState
 from gazebo_msgs.srv import SetEntityState
 
@@ -17,26 +16,21 @@ from gazebo_msgs.srv import SetEntityState
 class PoseStabilizer(Node):
     def __init__(self):
         super().__init__('pose_stabilizer')
-        self.x = None
-        self.y = None
-        self.yaw = None
+        # The Ackermann plugin may publish a relative (0, 0) odometry sample
+        # before its world pose is ready. Start from the SDF spawn pose so that
+        # this node cannot teleport the car into the centre of the board.
+        self.declare_parameter('initial_x', 1.35)
+        self.declare_parameter('initial_y', -1.45)
+        self.declare_parameter('initial_yaw', math.pi/2)
+        self.x = float(self.get_parameter('initial_x').value)
+        self.y = float(self.get_parameter('initial_y').value)
+        self.yaw = float(self.get_parameter('initial_yaw').value)
         self.last_time = None
         self.cmd = Twist()
         self.pending = None
         self.client = self.create_client(SetEntityState, '/set_entity_state')
-        self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.create_subscription(Twist, '/cmd_vel', self.on_cmd, 10)
         self.create_timer(.02, self.tick)
-
-    def on_odom(self, msg):
-        if self.x is not None:
-            return
-        p = msg.pose.pose.position
-        q = msg.pose.pose.orientation
-        yaw = math.atan2(2*(q.w*q.z+q.x*q.y),
-                         1-2*(q.y*q.y+q.z*q.z))
-        if all(math.isfinite(v) for v in (p.x,p.y,yaw)):
-            self.x, self.y, self.yaw = p.x, p.y, yaw
 
     def on_cmd(self, msg):
         self.cmd = msg
