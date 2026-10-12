@@ -682,7 +682,7 @@ car.append('''<plugin name="ackermann_drive" filename="libgazebo_ros_ackermann_d
 HEAD = '''<?xml version="1.0"?>
 <sdf version="1.6"><world name="sandbox">
 <gravity>0 0 -9.81</gravity>
-<physics type="ode"><max_step_size>.001</max_step_size><real_time_update_rate>1000</real_time_update_rate></physics>
+<physics type="ode"><max_step_size>.005</max_step_size><real_time_update_rate>200</real_time_update_rate></physics>
 <scene><ambient>.78 .78 .78 1</ambient><background>.83 .90 .97 1</background></scene>
 <include><uri>model://sun</uri></include>
 <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so"/>
