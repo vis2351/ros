@@ -11,9 +11,17 @@ OUTPUT = PACKAGE / "worlds" / "sandbox.world"
 PI = math.pi
 CROSS_DY = -.325
 parts = []
+active_group = None
 
 COLORS = {
     "grass": "0.36 0.52 0.31 1",
+    "lawn": "0.27 0.49 0.25 1",
+    "hedge": "0.18 0.34 0.16 1",
+    "leaf": "0.26 0.37 0.20 1",
+    "leaf_light": "0.39 0.48 0.25 1",
+    "trunk": "0.29 0.22 0.15 1",
+    "water": "0.10 0.35 0.55 1",
+    "path": "0.64 0.62 0.56 1",
     "asphalt": "0.16 0.18 0.20 1",
     "parking": "0.27 0.29 0.31 1",
     "white": "0.96 0.96 0.90 1",
@@ -21,6 +29,11 @@ COLORS = {
     "curb": "0.69 0.68 0.62 1",
     "fence": "0.22 0.36 0.40 1",
     "building": "0.66 0.63 0.56 1",
+    "glass": "0.29 0.53 0.63 1",
+    "glass_light": "0.44 0.66 0.72 1",
+    "glass_dark": "0.18 0.38 0.49 1",
+    "frame": "0.72 0.79 0.78 1",
+    "concrete": "0.48 0.54 0.55 1",
     "roof": "0.65 0.24 0.18 1",
     "pole": "0.13 0.15 0.18 1",
     "red": "0.95 0.07 0.05 1",
@@ -39,6 +52,19 @@ def px(x, y):
 
 def model(name, x, y, z, geometry, color, collision=False, roll=0, pitch=0, yaw=0):
     rgba = COLORS.get(color, color)
+    if active_group is not None:
+        pose = f'<pose>{fmt(x)} {fmt(y)} {fmt(z)} {fmt(roll)} {fmt(pitch)} {fmt(yaw)}</pose>'
+        index = len(active_group)
+        if collision:
+            active_group.append(
+                f'<collision name="collision_{index}">{pose}{geometry}</collision>'
+            )
+        active_group.append(
+            f'<visual name="visual_{index}">{pose}{geometry}'
+            f'<material><ambient>{rgba}</ambient><diffuse>{rgba}</diffuse></material>'
+            '</visual>'
+        )
+        return
     col = f'<collision name="collision">{geometry}</collision>' if collision else ""
     parts.append(
         f'<model name="{name}"><static>true</static>'
@@ -49,6 +75,22 @@ def model(name, x, y, z, geometry, color, collision=False, roll=0, pitch=0, yaw=
     )
 
 
+def begin_group(name):
+    """Collect many small static shapes in one model instead of hundreds."""
+    global active_group
+    if active_group is not None:
+        raise RuntimeError('Nested static model groups are not supported')
+    active_group = [name]
+
+
+def end_group():
+    global active_group
+    name, *items = active_group
+    parts.append(f'<model name="{name}"><static>true</static>'
+                 f'<link name="body">{"".join(items)}</link></model>')
+    active_group = None
+
+
 def box(name, x, y, z, sx, sy, sz, color, collision=False, yaw=0, pitch=0):
     geom = f'<geometry><box><size>{fmt(sx)} {fmt(sy)} {fmt(sz)}</size></box></geometry>'
     model(name, x, y, z, geom, color, collision, pitch=pitch, yaw=yaw)
@@ -56,6 +98,11 @@ def box(name, x, y, z, sx, sy, sz, color, collision=False, yaw=0, pitch=0):
 
 def cylinder(name, x, y, z, radius, height, color, collision=False):
     geom = f'<geometry><cylinder><radius>{fmt(radius)}</radius><length>{fmt(height)}</length></cylinder></geometry>'
+    model(name, x, y, z, geom, color, collision)
+
+
+def sphere(name, x, y, z, radius, color, collision=False):
+    geom = f'<geometry><sphere><radius>{fmt(radius)}</radius></sphere></geometry>'
     model(name, x, y, z, geom, color, collision)
 
 
@@ -100,6 +147,54 @@ def bezier(a, b, c, d, t):
     u = 1 - t
     return (u**3*a[0] + 3*u*u*t*b[0] + 3*u*t*t*c[0] + t**3*d[0],
             u**3*a[1] + 3*u*u*t*b[1] + 3*u*t*t*c[1] + t**3*d[1])
+
+
+def curve_points(a, b, c, d, count=8):
+    return [bezier(a, b, c, d, i/count) for i in range(1, count+1)]
+
+
+def arc_points(center, radius, start_deg, end_deg, count=4):
+    return [(center[0]+radius*math.cos(math.radians(start_deg+(end_deg-start_deg)*i/count)),
+             center[1]+radius*math.sin(math.radians(start_deg+(end_deg-start_deg)*i/count)))
+            for i in range(1, count+1)]
+
+
+def edge_strip(name, points, top=.137, height=.13, width=.018,
+               color='curb', collision=True):
+    """A slim upright border is visible to the level 2D laser at z=0.10 m."""
+    for i,(p,q) in enumerate(zip(points, points[1:])):
+        segment(f'{name}_{i:02d}', p, q, width, color,
+                z0=top, thick=height, collision=collision)
+
+
+def rounded_plot(left, right, bottom, top, radius=.15):
+    p=[(left+radius,bottom),(right-radius,bottom)]
+    p+=arc_points((right-radius,bottom+radius),radius,-90,0)
+    p.append((right,top-radius))
+    p+=arc_points((right-radius,top-radius),radius,0,90)
+    p.append((left+radius,top))
+    p+=arc_points((left+radius,top-radius),radius,90,180)
+    p.append((left,bottom+radius))
+    p+=arc_points((left+radius,bottom+radius),radius,180,270)
+    return p
+
+
+def planted_edge(name, points, shrub_step=.15):
+    edge_strip(name+'_lidar_border',points)
+    distance=0.
+    next_shrub=.035
+    count=0
+    for p,q in zip(points,points[1:]):
+        span=math.dist(p,q)
+        while next_shrub<=distance+span:
+            t=(next_shrub-distance)/span
+            x=p[0]+(q[0]-p[0])*t
+            y=p[1]+(q[1]-p[1])*t
+            sphere(f'{name}_shrub_{count:02d}',x,y,.105,.046,
+                   'leaf_light' if count%4==0 else 'hedge')
+            count+=1
+            next_shrub+=shrub_step
+        distance+=span
 
 
 def curve_px(name, controls, count=25, width=.30, color="asphalt", z=.004):
@@ -215,6 +310,41 @@ arc('corner_bottom_left', (-1.0, -2.175), .35, -90, -180, 16)
 for side, x in [('left', -1.0), ('right', 1.0)]:
     cylinder(f'viaduct_post_{side}', x, 2.35, .075, .018, .15, 'curb', True)
 
+# The real upper road has side barriers. Besides matching the photograph,
+# these continuous rails give the LiDAR a readable elevated-road outline.
+def ramp_z(y):
+    return -.004+.154*(y-.70)/(2.025-.70)
+
+
+begin_group('upper_road_barriers')
+for side,x in [('west',-1.35),('east',1.35)]:
+    for side_name,edge_x in [('inner',x-(.17 if x>0 else -.17)),
+                             ('outer',x+(.17 if x>0 else -.17))]:
+        segment(f'upper_{side}_{side_name}_rail',
+                (edge_x,.88),(edge_x,2.025),.014,'frame',
+                z0=ramp_z(.88)+.15,z1=.30,thick=.145,collision=True)
+        for i in range(5):
+            y=.92+i*.25
+            cylinder(f'upper_{side}_{side_name}_post_{i}',edge_x,y,
+                     ramp_z(y)+.077,.005,.15,'concrete')
+for side,center,start,end in [('east',(1.025,2.025),0,90),
+                              ('west',(-1.025,2.025),90,180)]:
+    for edge_name,radius in [('inner',.155),('outer',.495)]:
+        points=[(center[0]+radius*math.cos(math.radians(start)),
+                 center[1]+radius*math.sin(math.radians(start)))]
+        points+=arc_points(center,radius,start,end,6)
+        edge_strip(f'upper_{side}_{edge_name}_curve',points,
+                   top=.30,height=.145,width=.014,color='frame')
+for edge_name,y in [('inner',2.18),('outer',2.52)]:
+    edge_strip(f'upper_top_{edge_name}_rail',
+               [(-1.025,y),(1.025,y)],top=.30,height=.145,
+               width=.014,color='frame')
+    for i in range(9):
+        x=-1.0+i*.25
+        cylinder(f'upper_top_{edge_name}_post_{i}',x,y,.225,
+                 .005,.15,'concrete')
+end_group()
+
 # A circular island separates the upper and lower west-to-east branches.
 # The markings and route permit west entry and east exit only; there is no
 # clockwise circulation rule around the whole circle.
@@ -222,7 +352,17 @@ cylinder('fork_ring_road', 0, .675, 0, .60, .008, 'asphalt')
 segment('fork_in', (-1.35,.675), (-.42,.675), .30)
 segment('fork_out', (.42,.675), (1.35,.675), .30)
 cylinder('central_island', 0, .675, .016, .30, .032, 'grass', True)
-cylinder('island_flowerbed', 0, .675, .039, .15, .014, 'yellow')
+cylinder('island_flowerbed', 0, .675, .038, .155, .012, 'lawn')
+begin_group('central_island_landscape')
+island_edge=[(.292,.675)]+arc_points((0,.675),.292,0,360,24)
+edge_strip('central_island_kerb',island_edge,
+           top=.135,height=.13,width=.012,color='curb')
+for i in range(9):
+    angle=2*PI*i/9
+    sphere(f'island_bush_{i}',.18*math.cos(angle),
+           .675+.18*math.sin(angle),.09,.065,
+           'leaf_light' if i%3==0 else 'hedge')
+end_group()
 
 # Four arms of the central crossroads: 0.60 m total, two 0.30 m lanes.
 cross_y = -.575 + CROSS_DY
@@ -260,6 +400,15 @@ for name, p, q in [
     ('parking_edge_right',(1.025,2.15),(1.025,1.10)),
 ]:
     segment(name,p,q,.015,'curb',z0=.026,thick=.03,collision=True)
+# The upper road is 0.15 m above this lot. Its retaining edge must reach
+# both the parking-lot scan plane and the upper-road scan plane.
+begin_group('parking_lidar_edges')
+segment('parking_upper_retaining_wall',(-1.025,2.16),(1.025,2.16),
+        .018,'concrete',z0=.31,thick=.31,collision=True)
+for side,x in [('west',-1.045),('east',1.045)]:
+    edge_strip(f'parking_{side}_edge',[(x,1.12),(x,2.14)],
+               top=.14,height=.135,width=.016,color='curb')
+end_group()
 # Eight perpendicular bays, each 0.19 m wide and 0.31 m deep.
 for i in range(9):
     x = -.82 + i*.205
@@ -267,19 +416,104 @@ for i in range(9):
 paint('bay_rear_line',(-.82,2.09),(.82,2.09),.009,z=.014)
 paint('bay_front_line',(-.82,1.78),(.82,1.78),.009,z=.014)
 
-# The table's grass surface supplies the plots; their boundaries follow the
-# curved road edges instead of raised rectangular slabs covering the asphalt.
-for name,x,y,sx,sy,height in [
-    ('building_west',-.69,-1.56,.39,.31,.29),
-    ('building_east',.69,-1.60,.40,.32,.36),
-    ('service_west',-.70,-2.10,.30,.24,.22),
-    ('service_east',.68,-2.12,.28,.26,.24),
-]:
-    box(name,x,y,height/2,sx,sy,height,'building',True)
-    box(name+'_roof',x,y,height+.01,sx+.025,sy+.025,.02,'roof')
-for i,(x,y) in enumerate([(-1.12,.20),(1.12,.20),(-1.12,-1.65),(1.12,-1.65)]):
-    cylinder(f'lamp_{i}',x,y,.16,.009,.32,'pole',True)
-    cylinder(f'lamp_cap_{i}',x,y,.327,.026,.015,'white')
+# Photograph-based plot treatment: the southwest block is a landscaped park,
+# southeast has glass towers, and the two north blocks have low modern halls.
+# Continuous slim borders make the *road geometry* appear in a 2D laser map;
+# paint and flat lawns alone would be invisible to a horizontal scan.
+begin_group('photographic_landscape')
+for name,left,right in [('southwest',-1.17,-.33),
+                        ('southeast',.33,1.17)]:
+    planted_edge(name,rounded_plot(left,right,-2.34,-1.24,.16),.19)
+
+upper_west=[(-1.17,-.55),(-.46,-.55)]
+upper_west+=arc_points((-.46,-.44),.11,-90,0,4)
+upper_west.append((-.35,.10))
+upper_west+=curve_points((-.35,.10),(-.38,.25),(-.56,.31),(-.70,.44))
+upper_west+=curve_points((-.70,.44),(-.84,.53),(-.96,.49),(-1.17,.49))
+upper_west.append((-1.17,-.55))
+planted_edge('northwest',upper_west,.18)
+planted_edge('northeast',[(-x,y) for x,y in upper_west],.18)
+
+def miniature_tree(name,x,y,canopy=.055,height=.13):
+    cylinder(name+'_trunk',x,y,height/2,.007,height,'trunk',True)
+    sphere(name+'_crown',x,y,height+.025,canopy,
+           'leaf_light' if (len(name)%3==0) else 'leaf')
+
+
+def glass_building(name,x,y,sx,sy,height,panes=3):
+    box(name+'_body',x,y,height/2,sx,sy,height,'glass',True)
+    box(name+'_roof',x,y,height+.006,sx+.018,sy+.018,.012,'frame')
+    for i in range(1,panes):
+        z=height*i/panes
+        box(f'{name}_band_n_{i}',x,y+sy/2+.001,z,sx,.004,.006,'frame')
+        box(f'{name}_band_s_{i}',x,y-sy/2-.001,z,sx,.004,.006,'frame')
+        box(f'{name}_band_e_{i}',x+sx/2+.001,y,z,.004,sy,.006,'frame')
+        box(f'{name}_band_w_{i}',x-sx/2-.001,y,z,.004,sy,.006,'frame')
+    for j in range(1,4):
+        fx=x-sx/2+sx*j/4
+        box(f'{name}_mullion_n_{j}',fx,y+sy/2+.002,height/2,
+            .004,.004,height,'frame')
+        box(f'{name}_mullion_s_{j}',fx,y-sy/2-.002,height/2,
+            .004,.004,height,'frame')
+
+
+# Southwest: two blue ponds and orthogonal pedestrian paths under dense trees.
+for name,x,y,r in [('park_pond_w',-.93,-1.92,.14),
+                   ('park_pond_e',-.53,-1.62,.115)]:
+    cylinder(name,x,y,.004,r,.008,'water')
+segment('park_walk_n_s',(-.73,-1.31),(-.73,-2.24),.037,'path',z0=.004)
+segment('park_walk_e_w',(-1.08,-1.76),(-.40,-1.76),.037,'path',z0=.004)
+for i,(x,y) in enumerate([
+    (-1.02,-1.39),(-.90,-1.43),(-.57,-1.40),(-.42,-1.45),
+    (-1.03,-1.60),(-.83,-1.59),(-.60,-1.56),(-.43,-1.62),
+    (-1.08,-1.82),(-.76,-1.90),(-.47,-1.86),
+    (-1.06,-2.10),(-.84,-2.13),(-.65,-2.13),(-.45,-2.11)
+]):
+    miniature_tree(f'park_tree_{i}',x,y,.055+(i%3)*.009,.11+(i%4)*.012)
+
+# Southeast: a cluster of blue glazed towers on connected low podiums.
+glass_building('city_tower_a',.61,-1.53,.20,.22,.50,5)
+glass_building('city_tower_b',.88,-1.68,.22,.23,.42,4)
+glass_building('city_tower_c',.54,-1.98,.19,.17,.27,3)
+glass_building('city_tower_d',.89,-2.02,.21,.17,.20,2)
+glass_building('city_podium',.73,-2.22,.57,.11,.09,2)
+for i,(x,y) in enumerate([(.40,-1.39),(1.07,-1.41),
+                           (.39,-1.76),(1.07,-1.89),(.39,-2.21)]):
+    miniature_tree(f'city_tree_{i}',x,y,.047,.105)
+
+# Northwest and northeast: the low research hall and tilted solar canopies.
+glass_building('research_hall_w',-.78,-.26,.44,.21,.18,3)
+glass_building('research_annex_w',-.48,-.35,.17,.15,.11,2)
+box('research_roof_skylight',-.76,-.26,.206,.24,.075,.025,'glass_dark')
+glass_building('solar_hall_e',.75,-.28,.43,.22,.14,2)
+glass_building('solar_annex_e',.90,.01,.18,.18,.11,2)
+for i,(x,y) in enumerate([(.56,-.25),(.74,-.25),(.92,-.25)]):
+    box(f'solar_panel_{i}',x,y,.172,.14,.20,.016,'glass_dark',
+        pitch=-.22)
+for name,x,y in [('research_lawn',-.92,.19),('solar_lawn',.85,.22)]:
+    cylinder(name,x,y,.003,.13,.006,'lawn')
+for i,(x,y) in enumerate([(-1.03,-.32),(-1.03,.17),(-.76,.25),
+                           (.53,.22),(.97,-.40),(1.06,.22)]):
+    miniature_tree(f'north_tree_{i}',x,y,.045,.10)
+
+# The photograph shows small shrubs along the perimeter and flag-bearing
+# curved lamps. These are visual details; the solid plot borders above carry
+# the SLAM contour without narrowing any 0.30 m lane.
+for side,x in [('west',-1.59),('east',1.59)]:
+    for i in range(23):
+        y=-2.45+i*.22
+        sphere(f'perimeter_{side}_{i}',x,y,.054,.036,'hedge')
+for side,y in [('south',-2.62),('north',2.62)]:
+    for i in range(13):
+        x=-1.44+i*.24
+        sphere(f'perimeter_{side}_{i}',x,y,.054,.036,'hedge')
+for i,(x,y) in enumerate([(-1.12,.20),(1.12,.20),
+                           (-1.12,-1.65),(1.12,-1.65),
+                           (-.42,-.43),(.42,-.43)]):
+    cylinder(f'lamp_{i}',x,y,.16,.009,.32,'frame',True)
+    sphere(f'lamp_cap_{i}',x+.018,y,.327,.025,'white')
+    box(f'lamp_flag_{i}',x,y+.018,.235,.006,.055,.039,'red')
+end_group()
 
 # Painted yellow two-way centreline, white zebra crossings, stop lines and arrows.
 for i in range(15):
