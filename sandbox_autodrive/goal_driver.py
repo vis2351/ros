@@ -32,6 +32,7 @@ class GoalDriver(Node):
         self.spec = json.loads(config.read_text())
         self.declare_parameter('auto_survey', True)
         self.auto_survey = bool(self.get_parameter('auto_survey').value)
+        self.declare_parameter('survey_start_index', 0)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.odom = None
@@ -70,6 +71,8 @@ class GoalDriver(Node):
             self.set_stages([{'gear':1,'points':points,
                               'stops':[(stop_idx,stop)],
                               'edges':['initial_slam_survey']}], 'mapping_drive')
+            self.idx=max(0,min(len(points)-1,
+                               int(self.get_parameter('survey_start_index').value)))
         self.get_logger().info('Click 2D Goal Pose in RViz or publish /goal_pose; '
                                'targets snap to drivable directed lanes and bays')
 
@@ -239,10 +242,12 @@ class GoalDriver(Node):
             if not math.isfinite(value) or value<scan.range_min:
                 continue
             angle=scan.angle_min+i*scan.angle_increment
-            relevant=(abs(abs(angle)-math.pi)<.38 if reverse else
-                      abs(angle)<.38)
-            if relevant and value<closest:
-                closest=value
+            forward=value*math.cos(angle)*(-1 if reverse else 1)
+            lateral=value*math.sin(angle)
+            # The road is only 0.30 m wide. Curbs beside the car must not
+            # trigger emergency braking; inspect the swept body corridor.
+            if forward>0 and abs(lateral)<.075 and forward<closest:
+                closest=forward
         return closest
 
     def tick(self):
@@ -335,7 +340,7 @@ class GoalDriver(Node):
         remaining=self.arc_lengths[-1]-self.arc_lengths[self.idx]
         if remaining<.20:
             speed=math.copysign(min(abs(speed),max(.025,.45*remaining)),speed)
-        if self.obstacle_distance(reverse)<.15:
+        if self.obstacle_distance(reverse)<.17:
             speed=0.
             state='blocked_by_lidar'
         cmd=Twist()
