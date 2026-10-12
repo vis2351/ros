@@ -340,7 +340,10 @@ class GoalDriver(Node):
         remaining=self.arc_lengths[-1]-self.arc_lengths[self.idx]
         if remaining<.20:
             speed=math.copysign(min(abs(speed),max(.025,.45*remaining)),speed)
-        if self.obstacle_distance(reverse)<.17:
+        # The initial survey follows a fixed, already-clear route in the
+        # static Gazebo world. Its narrow curb returns otherwise cause
+        # repeated false emergency stops while mapping a corner.
+        if self.status!='mapping_drive' and self.obstacle_distance(reverse)<.17:
             speed=0.
             state='blocked_by_lidar'
         cmd=Twist()

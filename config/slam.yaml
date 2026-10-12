@@ -38,7 +38,9 @@ slam_toolbox:
     enable_interactive_mode: true
 
     # General Parameters
-    use_scan_matching: true
+    # Gazebo publishes the car's world pose as odometry. Matching scans
+    # against long, repetitive curbs can shear this small synthetic map.
+    use_scan_matching: false
     use_scan_barycenter: true
     minimum_travel_distance: 0.05
     minimum_travel_heading: 0.12
@@ -47,7 +49,7 @@ slam_toolbox:
     link_match_minimum_response_fine: 0.1  
     link_scan_maximum_distance: 1.5
     loop_search_maximum_distance: 0.6
-    do_loop_closing: true 
+    do_loop_closing: false
     loop_match_minimum_chain_size: 10           
     loop_match_maximum_variance_coarse: 3.0  
     loop_match_minimum_response_coarse: 0.35    
